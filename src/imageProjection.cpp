@@ -14,6 +14,20 @@ POINT_CLOUD_REGISTER_POINT_STRUCT (VelodynePointXYZIRT,
     (uint16_t, ring, ring) (float, time, time)
 )
 
+struct LiovxPointCustomMsg
+{
+    PCL_ADD_POINT4D
+    PCL_ADD_INTENSITY;
+    float time;
+    uint16_t ring;
+    uint16_t tag;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+} EIGEN_ALIGN16;
+POINT_CLOUD_REGISTER_POINT_STRUCT (LiovxPointCustomMsg,
+    (float, x, x) (float, y, y) (float, z, z) (float, intensity, intensity) (float, time, time)
+    (uint16_t, ring, ring) (uint16_t, tag, tag)
+)
+
 struct OusterPointXYZIRT {
     PCL_ADD_POINT4D;
     float intensity;
@@ -30,8 +44,8 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(OusterPointXYZIRT,
     (uint8_t, ring, ring) (uint16_t, noise, noise) (uint32_t, range, range)
 )
 
-// Use the Velodyne point format as a common representation
-using PointXYZIRT = VelodynePointXYZIRT;
+// Use the Livox point format as a common representation
+using PointXYZIRT = LiovxPointCustomMsg;
 
 const int queueLength = 2000;
 
@@ -54,8 +68,8 @@ private:
     ros::Subscriber subOdom;
     std::deque<nav_msgs::Odometry> odomQueue;
 
-    std::deque<sensor_msgs::PointCloud2> cloudQueue;
-    sensor_msgs::PointCloud2 currentCloudMsg;
+    std::deque<livox_ros_driver::CustomMsg> cloudQueue;
+    livox_ros_driver::CustomMsg currentCloudMsg;
 
     double *imuTime = new double[queueLength];
     double *imuRotX = new double[queueLength];
@@ -84,6 +98,7 @@ private:
     double timeScanEnd;
     std_msgs::Header cloudHeader;
 
+    vector<int> columnIdnCountVec;
 
 public:
     ImageProjection():
@@ -91,7 +106,7 @@ public:
     {
         subImu        = nh.subscribe<sensor_msgs::Imu>(robot_id + "/" + imuTopic, 2000, &ImageProjection::imuHandler, this, ros::TransportHints().tcpNoDelay());
         subOdom       = nh.subscribe<nav_msgs::Odometry>(robot_id + "/" + odomTopic+"_incremental", 2000, &ImageProjection::odometryHandler, this, ros::TransportHints().tcpNoDelay());
-        subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(robot_id + "/" + pointCloudTopic, 5, &ImageProjection::cloudHandler, this, ros::TransportHints().tcpNoDelay());
+        subLaserCloud = nh.subscribe<livox_ros_driver::CustomMsg>(robot_id + "/" + pointCloudTopic, 5, &ImageProjection::cloudHandler, this, ros::TransportHints().tcpNoDelay());
 
         pubExtractedCloud = nh.advertise<sensor_msgs::PointCloud2> (robot_id + "/lio_sam/deskew/cloud_deskewed", 1);
         pubLaserCloudInfo = nh.advertise<lio_sam::cloud_info> (robot_id + "/lio_sam/deskew/cloud_info", 1);
@@ -138,6 +153,8 @@ public:
             imuRotY[i] = 0;
             imuRotZ[i] = 0;
         }
+
+        columnIdnCountVec.assign(N_SCAN, 0);
     }
 
     ~ImageProjection(){}
@@ -173,7 +190,7 @@ public:
         odomQueue.push_back(*odometryMsg);
     }
 
-    void cloudHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg)
+    void cloudHandler(const livox_ros_driver::CustomMsgConstPtr& laserCloudMsg)
     {
         if (!cachePointCloud(laserCloudMsg))
             return;
@@ -189,8 +206,31 @@ public:
 
         resetParameters();
     }
+    
+    void moveFromCustomMsg(livox_ros_driver::CustomMsg &Msg, pcl::PointCloud<PointXYZIRT> & cloud)
+    {
+        cloud.clear();
+        cloud.reserve(Msg.point_num);
+        PointXYZIRT point;
 
-    bool cachePointCloud(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg)
+        cloud.header.frame_id=Msg.header.frame_id;
+        cloud.header.stamp=Msg.header.stamp.toNSec()/1000;
+        cloud.header.seq=Msg.header.seq;
+
+        for(uint i=0;i<Msg.point_num-1;i++)
+        {
+            point.x=Msg.points[i].x; 
+            point.y=Msg.points[i].y; 
+            point.z=Msg.points[i].z; 
+            point.intensity=Msg.points[i].reflectivity; 
+            point.tag=Msg.points[i].tag; 
+            point.time=Msg.points[i].offset_time*1e-9; 
+            point.ring=Msg.points[i].line; 
+            cloud.push_back(point);
+        }
+    }
+
+    bool cachePointCloud(const livox_ros_driver::CustomMsgConstPtr& laserCloudMsg)
     {
         // cache point cloud
         cloudQueue.push_back(*laserCloudMsg);
@@ -200,7 +240,11 @@ public:
         // convert cloud
         currentCloudMsg = std::move(cloudQueue.front());
         cloudQueue.pop_front();
-        if (sensor == SensorType::VELODYNE)
+        if (sensor == SensorType::LIVOX)
+        {
+            moveFromCustomMsg(currentCloudMsg, *laserCloudIn);
+        }
+        else if (sensor == SensorType::VELODYNE)
         {
             pcl::moveFromROSMsg(currentCloudMsg, *laserCloudIn);
         }
@@ -537,12 +581,20 @@ public:
             if (rowIdn % downsampleRate != 0)
                 continue;
 
-            float horizonAngle = atan2(thisPoint.x, thisPoint.y) * 180 / M_PI;
-
-            static float ang_res_x = 360.0/float(Horizon_SCAN);
-            int columnIdn = -round((horizonAngle-90.0)/ang_res_x) + Horizon_SCAN/2;
-            if (columnIdn >= Horizon_SCAN)
-                columnIdn -= Horizon_SCAN;
+            int columnIdn = -1;
+            if (sensor == SensorType::VELODYNE || sensor == SensorType::OUSTER)
+            {
+                float horizonAngle = atan2(thisPoint.x, thisPoint.y) * 180 / M_PI;
+                static float ang_res_x = 360.0/float(Horizon_SCAN);
+                columnIdn = -round((horizonAngle-90.0)/ang_res_x) + Horizon_SCAN/2;
+                if (columnIdn >= Horizon_SCAN)
+                    columnIdn -= Horizon_SCAN;
+            }
+            else if (sensor == SensorType::LIVOX)
+            {
+                columnIdn = columnIdnCountVec[rowIdn];
+                columnIdnCountVec[rowIdn] += 1;
+            }
 
             if (columnIdn < 0 || columnIdn >= Horizon_SCAN)
                 continue;
