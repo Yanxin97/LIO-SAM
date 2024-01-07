@@ -53,7 +53,7 @@
 #include <thread>
 #include <mutex>
 
-#include "livox_ros_driver/CustomMsg.h"
+#include <livox_ros_driver2/CustomMsg.h>
 
 using namespace std;
 
@@ -311,7 +311,7 @@ public:
 };
 
 template<typename T>
-sensor_msgs::PointCloud2 publishCloud(ros::Publisher *thisPub, typename T::Ptr thisCloud, ros::Time thisStamp, std::string thisFrame)
+sensor_msgs::PointCloud2 publishCloud(ros::Publisher *thisPub, const T& thisCloud, ros::Time thisStamp, std::string thisFrame)
 {
     sensor_msgs::PointCloud2 tempCloud;
     pcl::toROSMsg(*thisCloud, tempCloud);

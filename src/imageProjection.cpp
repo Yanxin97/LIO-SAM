@@ -68,8 +68,8 @@ private:
     ros::Subscriber subOdom;
     std::deque<nav_msgs::Odometry> odomQueue;
 
-    std::deque<livox_ros_driver::CustomMsg> cloudQueue;
-    livox_ros_driver::CustomMsg currentCloudMsg;
+    std::deque<livox_ros_driver2::CustomMsg> cloudQueue;
+    livox_ros_driver2::CustomMsg currentCloudMsg;
 
     double *imuTime = new double[queueLength];
     double *imuRotX = new double[queueLength];
@@ -106,7 +106,7 @@ public:
     {
         subImu        = nh.subscribe<sensor_msgs::Imu>(robot_id + "/" + imuTopic, 2000, &ImageProjection::imuHandler, this, ros::TransportHints().tcpNoDelay());
         subOdom       = nh.subscribe<nav_msgs::Odometry>(robot_id + "/" + odomTopic+"_incremental", 2000, &ImageProjection::odometryHandler, this, ros::TransportHints().tcpNoDelay());
-        subLaserCloud = nh.subscribe<livox_ros_driver::CustomMsg>(robot_id + "/" + pointCloudTopic, 5, &ImageProjection::cloudHandler, this, ros::TransportHints().tcpNoDelay());
+        subLaserCloud = nh.subscribe<livox_ros_driver2::CustomMsg>(robot_id + "/" + pointCloudTopic, 5, &ImageProjection::cloudHandler, this, ros::TransportHints().tcpNoDelay());
 
         pubExtractedCloud = nh.advertise<sensor_msgs::PointCloud2> (robot_id + "/lio_sam/deskew/cloud_deskewed", 1);
         pubLaserCloudInfo = nh.advertise<lio_sam::cloud_info> (robot_id + "/lio_sam/deskew/cloud_info", 1);
@@ -190,7 +190,7 @@ public:
         odomQueue.push_back(*odometryMsg);
     }
 
-    void cloudHandler(const livox_ros_driver::CustomMsgConstPtr& laserCloudMsg)
+    void cloudHandler(const livox_ros_driver2::CustomMsgConstPtr& laserCloudMsg)
     {
         if (!cachePointCloud(laserCloudMsg))
             return;
@@ -207,7 +207,7 @@ public:
         resetParameters();
     }
     
-    void moveFromCustomMsg(livox_ros_driver::CustomMsg &Msg, pcl::PointCloud<PointXYZIRT> & cloud)
+    void moveFromCustomMsg(livox_ros_driver2::CustomMsg &Msg, pcl::PointCloud<PointXYZIRT> & cloud)
     {
         cloud.clear();
         cloud.reserve(Msg.point_num);
@@ -230,7 +230,7 @@ public:
         }
     }
 
-    bool cachePointCloud(const livox_ros_driver::CustomMsgConstPtr& laserCloudMsg)
+    bool cachePointCloud(const livox_ros_driver2::CustomMsgConstPtr& laserCloudMsg)
     {
         // cache point cloud
         cloudQueue.push_back(*laserCloudMsg);
@@ -244,28 +244,28 @@ public:
         {
             moveFromCustomMsg(currentCloudMsg, *laserCloudIn);
         }
-        else if (sensor == SensorType::VELODYNE)
-        {
-            pcl::moveFromROSMsg(currentCloudMsg, *laserCloudIn);
-        }
-        else if (sensor == SensorType::OUSTER)
-        {
-            // Convert to Velodyne format
-            pcl::moveFromROSMsg(currentCloudMsg, *tmpOusterCloudIn);
-            laserCloudIn->points.resize(tmpOusterCloudIn->size());
-            laserCloudIn->is_dense = tmpOusterCloudIn->is_dense;
-            for (size_t i = 0; i < tmpOusterCloudIn->size(); i++)
-            {
-                auto &src = tmpOusterCloudIn->points[i];
-                auto &dst = laserCloudIn->points[i];
-                dst.x = src.x;
-                dst.y = src.y;
-                dst.z = src.z;
-                dst.intensity = src.intensity;
-                dst.ring = src.ring;
-                dst.time = src.t * 1e-9f;
-            }
-        }
+        // else if (sensor == SensorType::VELODYNE)
+        // {
+        //     pcl::moveFromROSMsg(currentCloudMsg, *laserCloudIn);
+        // }
+        // else if (sensor == SensorType::OUSTER)
+        // {
+        //     // Convert to Velodyne format
+        //     pcl::moveFromROSMsg(currentCloudMsg, *tmpOusterCloudIn);
+        //     laserCloudIn->points.resize(tmpOusterCloudIn->size());
+        //     laserCloudIn->is_dense = tmpOusterCloudIn->is_dense;
+        //     for (size_t i = 0; i < tmpOusterCloudIn->size(); i++)
+        //     {
+        //         auto &src = tmpOusterCloudIn->points[i];
+        //         auto &dst = laserCloudIn->points[i];
+        //         dst.x = src.x;
+        //         dst.y = src.y;
+        //         dst.z = src.z;
+        //         dst.intensity = src.intensity;
+        //         dst.ring = src.ring;
+        //         dst.time = src.t * 1e-9f;
+        //     }
+        // }
         else
         {
             ROS_ERROR_STREAM("Unknown sensor type: " << int(sensor));
@@ -284,41 +284,41 @@ public:
             ros::shutdown();
         }
 
-        // check ring channel
-        static int ringFlag = 0;
-        if (ringFlag == 0)
-        {
-            ringFlag = -1;
-            for (int i = 0; i < (int)currentCloudMsg.fields.size(); ++i)
-            {
-                if (currentCloudMsg.fields[i].name == "ring")
-                {
-                    ringFlag = 1;
-                    break;
-                }
-            }
-            if (ringFlag == -1)
-            {
-                ROS_ERROR("Point cloud ring channel not available, please configure your point cloud data!");
-                ros::shutdown();
-            }
-        }
+        // // check ring channel
+        // static int ringFlag = 0;
+        // if (ringFlag == 0)
+        // {
+        //     ringFlag = -1;
+        //     for (int i = 0; i < (int)currentCloudMsg.fields.size(); ++i)
+        //     {
+        //         if (currentCloudMsg.fields[i].name == "ring")
+        //         {
+        //             ringFlag = 1;
+        //             break;
+        //         }
+        //     }
+        //     if (ringFlag == -1)
+        //     {
+        //         ROS_ERROR("Point cloud ring channel not available, please configure your point cloud data!");
+        //         ros::shutdown();
+        //     }
+        // }
 
-        // check point time
-        if (deskewFlag == 0)
-        {
-            deskewFlag = -1;
-            for (auto &field : currentCloudMsg.fields)
-            {
-                if (field.name == "time" || field.name == "t")
-                {
-                    deskewFlag = 1;
-                    break;
-                }
-            }
-            if (deskewFlag == -1)
-                ROS_WARN("Point cloud timestamp not available, deskew function disabled, system will drift significantly!");
-        }
+        // // check point time
+        // if (deskewFlag == 0)
+        // {
+        //     deskewFlag = -1;
+        //     for (auto &field : currentCloudMsg.fields)
+        //     {
+        //         if (field.name == "time" || field.name == "t")
+        //         {
+        //             deskewFlag = 1;
+        //             break;
+        //         }
+        //     }
+        //     if (deskewFlag == -1)
+        //         ROS_WARN("Point cloud timestamp not available, deskew function disabled, system will drift significantly!");
+        // }
 
         return true;
     }
