@@ -13,11 +13,27 @@
     <rosparam file="$(find lio_sam)/config/paramsLivoxIMU.yaml" command="load" />
     <rosparam file="$(find lio_sam)/src/DiSCo-SLAM/config/mapfusion.yaml" command="load" />
     
-    <!--- LOAM -->
+    <!--- LOAM robot 0 -->
     <include file="$(find lio_sam)/launch/include/module_loam.launch" >
         <arg name="robot" value="$(arg robot0)"/>
         <arg name="id1" value="$(arg robot1)"/>
         <arg name="id2" value="$(arg robot2)"/>
+        <arg name="no" value="$(arg no)"/>
+    </include>
+
+    <!--- LOAM robot 1 -->
+    <include file="$(find lio_sam)/launch/include/module_loam.launch" >
+        <arg name="robot" value="$(arg robot1)"/>
+        <arg name="id1" value="$(arg robot0)"/>
+        <arg name="id2" value="$(arg robot2)"/>
+        <arg name="no" value="$(arg no)"/>
+    </include>
+
+    <!--- LOAM robot 2 -->
+    <include file="$(find lio_sam)/launch/include/module_loam.launch" >
+        <arg name="robot" value="$(arg robot2)"/>
+        <arg name="id1" value="$(arg robot0)"/>
+        <arg name="id2" value="$(arg robot1)"/>
         <arg name="no" value="$(arg no)"/>
     </include>
 
